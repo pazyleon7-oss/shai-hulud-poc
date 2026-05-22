@@ -10,7 +10,7 @@ This branch is intentionally the base project, not the attacker kit. The fork PR
 2. The base repository's `pull_request_target` workflow checks out the fork PR code.
 3. That workflow runs `npm install` and saves `node_modules` with `actions/cache`.
 4. The fork PR's install hook patches `node_modules/left-pad/index.js`.
-5. A later trusted release workflow restores the same `node_modules` cache.
+5. A trusted release workflow automatically starts after the PR quality workflow completes.
 6. The release workflow runs normal release code with `contents: write`.
 7. The release code imports `left-pad`; if the cache was poisoned, the patched package executes with the release workflow's authority.
 
@@ -59,12 +59,12 @@ The mistake is not a direct secret leak. The mistake is letting untrusted fork c
 
 ### `.github/workflows/release-report.yml`
 
-- trigger: manual `workflow_dispatch`
+- trigger: automatic `workflow_run` after `PR Quality Report`, plus manual `workflow_dispatch`
 - restores `node_modules` with key `node-modules-left-pad-v1`
 - runs `npm run release:notes`
 - has `contents: write`
 
-This simulates a trusted release/reporting job consuming cached dependency state.
+This simulates trusted release/reporting automation that consumes cached dependency state after PR automation finishes.
 
 ## Attacker Material
 
@@ -95,19 +95,13 @@ In the PR quality workflow summary, the fork-side proof should show:
 }
 ```
 
-After that workflow completes, manually run:
-
-```text
-Actions -> Release Report -> Run workflow
-```
-
-If the cache restored correctly, the release proof should show:
+After that workflow completes, `Release Report` should start automatically. If the cache restored correctly, the release proof should show:
 
 ```json
 {
   "message": "Patched npm package executed inside trusted release workflow.",
   "package": "left-pad",
-  "eventName": "workflow_dispatch",
+  "eventName": "workflow_run",
   "contentsWriteDemo": true,
   "markerFile": "hehe.txt",
   "gitPushAttempted": true

@@ -2,12 +2,16 @@ name: "Release Report"
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["PR Quality Report"]
+    types: [completed]
 
 permissions:
   contents: write
 
 jobs:
   release-report:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout release code
