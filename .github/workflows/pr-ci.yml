@@ -1,8 +1,9 @@
-name: "PR CI"
+name: "Base CI"
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, poc]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,7 +12,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout pull request
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -33,7 +34,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## PR CI report"
+            echo "## Base CI report"
             echo
             if [ -f .poc-proof/proof.json ]; then
               echo "Payload proof found:"
@@ -52,5 +53,5 @@ jobs:
         with:
           name: pr-ci-report
           path: .poc-proof/
+          include-hidden-files: true
           if-no-files-found: ignore
-

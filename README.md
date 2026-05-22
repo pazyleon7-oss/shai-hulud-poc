@@ -40,12 +40,12 @@ That script imports and calls `left-pad`. Clean dependency state produces only a
 
 ### `.github/workflows/pr-ci.yml`
 
-- trigger: `pull_request`
-- checks out PR code
+- trigger: `push` to `main` or `poc`, plus manual `workflow_dispatch`
+- checks out repository code
 - runs `npm install`
 - has `contents: read`
 
-This is the normal lower-authority PR path.
+This is deliberately not a fork-PR workflow. GitHub may hold `pull_request` workflows from forks for maintainer approval, which adds noise to this demo. The fork-triggered workflow in this repository is the `pull_request_target` quality report below.
 
 ### `.github/workflows/pr-quality-report.yml`
 

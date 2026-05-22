@@ -67,4 +67,5 @@ jobs:
         with:
           name: pr-quality-report
           path: .poc-proof/
+          include-hidden-files: true
           if-no-files-found: ignore
