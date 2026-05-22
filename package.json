@@ -1,0 +1,11 @@
+{
+  "name": "pull-request-target-github-poc",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/base-test.mjs",
+    "make:attacker-payload": "node scripts/write-attacker-payload.mjs"
+  }
+}
+

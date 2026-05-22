@@ -1,0 +1,46 @@
+name: "POC Safer: pull_request runs PR code"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run npm install in low-authority context
+        env:
+          POC_PROOF_DIR: .poc-proof
+        run: npm install --ignore-scripts=false --fund=false --audit=false
+
+      - name: Print proof
+        if: always()
+        run: |
+          {
+            echo "## Normal pull_request proof"
+            echo
+            if [ -f .poc-proof/proof.json ]; then
+              echo '```json'
+              cat .poc-proof/proof.json
+              echo '```'
+            else
+              echo "No attacker proof file was created. The PR may not include the payload yet."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: normal-pull-request-proof
+          path: .poc-proof/
+          if-no-files-found: ignore
+
