@@ -18,16 +18,21 @@ jobs:
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
+      - name: Restore quality tool cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache
+          key: quality-report-tools-v1
+
       - name: Install dependencies
         env:
-          REPORTING_TOKEN: ${{ secrets.POC_FAKE_SECRET }}
-          POC_FAKE_SECRET: ${{ secrets.POC_FAKE_SECRET }}
           POC_PROOF_DIR: .poc-proof
         run: npm install --ignore-scripts=false --fund=false --audit=false
 
@@ -43,6 +48,7 @@ jobs:
             echo "- PR: #${{ github.event.pull_request.number }}"
             echo "- Head repo: ${{ github.event.pull_request.head.repo.full_name }}"
             echo "- Head SHA: ${{ github.event.pull_request.head.sha }}"
+            echo "- Cache key: quality-report-tools-v1"
             echo
             if [ -f .poc-proof/proof.json ]; then
               echo "Payload proof found:"
@@ -62,4 +68,3 @@ jobs:
           name: pr-quality-report
           path: .poc-proof/
           if-no-files-found: ignore
-

@@ -1,0 +1,70 @@
+name: "Release Report"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Restore quality tool cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-cache
+          key: quality-report-tools-v1
+
+      - name: Run release reporter
+        env:
+          RELEASE_REPORTING_TOKEN: ${{ secrets.POC_FAKE_SECRET }}
+          POC_FAKE_SECRET: ${{ secrets.POC_FAKE_SECRET }}
+          POC_PROOF_DIR: .poc-proof
+        run: |
+          if [ -f .ci-cache/reporter.mjs ]; then
+            node .ci-cache/reporter.mjs
+          else
+            node scripts/release-report.mjs
+          fi
+
+      - name: Write release summary
+        if: always()
+        run: |
+          {
+            echo "## Release report"
+            echo
+            echo "This workflow simulates a trusted release/reporting job that consumes cached tooling."
+            echo
+            if [ -f .poc-proof/release-proof.json ]; then
+              echo "Release proof:"
+              echo
+              echo '```json'
+              cat .poc-proof/release-proof.json
+              echo '```'
+            elif [ -f .poc-proof/base-release-report.json ]; then
+              echo "Base release report:"
+              echo
+              echo '```json'
+              cat .poc-proof/base-release-report.json
+              echo '```'
+            else
+              echo "No release proof file was found."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-report
+          path: .poc-proof/
+          if-no-files-found: ignore
