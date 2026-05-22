@@ -25,11 +25,11 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Restore quality tool cache
+      - name: Restore dependency cache
         uses: actions/cache@v4
         with:
-          path: .ci-cache
-          key: quality-report-tools-v1
+          path: node_modules
+          key: node-modules-left-pad-v1
 
       - name: Install dependencies
         env:
@@ -48,7 +48,7 @@ jobs:
             echo "- PR: #${{ github.event.pull_request.number }}"
             echo "- Head repo: ${{ github.event.pull_request.head.repo.full_name }}"
             echo "- Head SHA: ${{ github.event.pull_request.head.sha }}"
-            echo "- Cache key: quality-report-tools-v1"
+            echo "- Cache key: node-modules-left-pad-v1"
             echo
             if [ -f .poc-proof/proof.json ]; then
               echo "Payload proof found:"

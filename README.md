@@ -1,21 +1,19 @@
 # PR Quality Report Demo
 
-Disposable GitHub Actions demo for the subtler `pull_request_target` failure mode:
+Disposable GitHub Actions demo for the subtler `pull_request_target` cache-poisoning pattern:
 
 1. A fork PR runs code in a target-repository workflow.
-2. That run does not receive the fake release secret.
-3. The fork code writes executable state into a shared cache.
-4. A later trusted release workflow restores the cache and executes that state with the fake release secret present.
+2. The fork code patches a real installed npm package in `node_modules`.
+3. `actions/cache` persists the modified `node_modules`.
+4. A later trusted release workflow restores that cache.
+5. The release workflow executes the patched package with `contents: write`.
+6. The patched package attempts to commit `hehe.txt` to `main` using the trusted workflow's checkout credentials.
 
-This is closer to the Mini Shai-Hulud / TanStack shape than a demo that simply passes a secret directly into `npm install`.
+This is closer to the Mini Shai-Hulud / TanStack shape than a demo that simply passes a secret directly into `npm install`. This version does not need a fake secret.
 
 ## Base repository setup
 
-Create a new public repository from this directory and add one fake repository secret:
-
-```text
-POC_FAKE_SECRET=fake-secret-for-demo-only
-```
+Create a new public repository from this directory.
 
 Do not add real tokens, cloud credentials, npm credentials, database URLs, Docker credentials, or production secrets.
 
@@ -26,6 +24,26 @@ git remote add origin git@github.com:YOUR_ACCOUNT/YOUR_REPO.git
 git push -u origin main
 ```
 
+## Real package used in the demo
+
+The base project depends on the real npm package:
+
+```json
+{
+  "dependencies": {
+    "left-pad": "1.3.0"
+  }
+}
+```
+
+The release workflow runs:
+
+```bash
+npm run release:notes
+```
+
+That script imports and calls `left-pad`. If `node_modules/left-pad/index.js` has been poisoned through cache, the release script executes the modified package code.
+
 ## Workflows in the base repository
 
 ### `.github/workflows/pr-ci.yml`
@@ -35,9 +53,8 @@ Normal PR CI:
 - trigger: `pull_request`
 - checks out PR code
 - runs `npm install`
-- does not receive `POC_FAKE_SECRET`
 
-This is the normal low-authority place to run PR code.
+This is the normal lower-authority place to run PR code.
 
 ### `.github/workflows/pr-quality-report.yml`
 
@@ -45,22 +62,22 @@ Realistic-looking mistake:
 
 - trigger: `pull_request_target`
 - checks out fork PR code
-- restores/saves `.ci-cache` with key `quality-report-tools-v1`
+- restores/saves `node_modules` with key `node-modules-left-pad-v1`
 - runs `npm install`
-- does not receive `POC_FAKE_SECRET`
 
-The obvious direct secret leak is not present. The mistake is that fork PR code can write cached executable state from inside a target-repository workflow.
+The mistake is that fork PR code can modify dependency state in `node_modules`, and the target-repository workflow can save that state into a cache key later used by the release workflow.
 
 ### `.github/workflows/release-report.yml`
 
 Trusted release/report workflow:
 
 - trigger: manual `workflow_dispatch`
-- restores `.ci-cache` with key `quality-report-tools-v1`
-- runs `.ci-cache/reporter.mjs` if it exists
-- receives `POC_FAKE_SECRET`
+- permission: `contents: write`
+- restores `node_modules` with key `node-modules-left-pad-v1`
+- runs `npm run release:notes`
+- does not contain a marker-commit step
 
-This simulates a trusted release job consuming cache state that was written by an untrusted PR path.
+This simulates a trusted release job consuming cached dependency state that was written by an untrusted PR path.
 
 ## Fork-side reproduction
 
@@ -87,22 +104,28 @@ It changes normal project files:
 - `package.json`
 - `scripts/attacker-postinstall.mjs`
 
-The generated `postinstall` does two things:
+The generated `postinstall` runs after dependencies install. It patches:
 
-1. Writes `.poc-proof/proof.json` showing it ran during the PR workflows.
-2. Writes `.ci-cache/reporter.mjs`, which is meant to be restored and executed later by the release workflow.
+```text
+node_modules/left-pad/index.js
+```
 
-No network requests are made. No secret values are printed.
+The patched `left-pad` still returns padded strings, but it also writes proof when the release workflow later imports it:
+
+- `.poc-proof/release-proof.json`
+- `hehe.txt`
+
+It then tries to commit and push only `hehe.txt` back to the same repository. No secret values are printed and there is no external exfiltration endpoint.
 
 ## Expected first result: PR workflows
 
-The normal PR workflow should show:
+The normal PR workflow should show something like:
 
 ```json
 {
   "eventName": "pull_request",
-  "fakeSecretPresentDuringInstall": false,
-  "cachedReporterWritten": true
+  "packagePatched": "left-pad",
+  "patchedFile": "node_modules/left-pad/index.js"
 }
 ```
 
@@ -111,12 +134,12 @@ The PR quality report workflow should show:
 ```json
 {
   "eventName": "pull_request_target",
-  "fakeSecretPresentDuringInstall": false,
-  "cachedReporterWritten": true
+  "packagePatched": "left-pad",
+  "patchedFile": "node_modules/left-pad/index.js"
 }
 ```
 
-The important part is that the target workflow did not need a secret in the install step. It only needed to let fork code write state into a cache that a later trusted workflow will use.
+The important part is that the target workflow did not need a secret in the install step. It only needed to let fork code modify cached dependency state.
 
 ## Expected second result: release workflow
 
@@ -126,20 +149,25 @@ After the PR quality report workflow completes, run this manually in the base re
 Actions -> Release Report -> Run workflow
 ```
 
-If the cache was saved and restored, the release workflow should execute the cached reporter and show:
+If the cache was saved and restored, the release workflow should execute the patched `left-pad` package and show:
 
 ```json
 {
-  "message": "Cached reporter executed inside trusted release workflow.",
+  "message": "Patched npm package executed inside trusted release workflow.",
+  "package": "left-pad",
   "eventName": "workflow_dispatch",
-  "fakeSecretPresent": true,
-  "releaseReportingTokenPresent": true
+  "contentsWriteDemo": true,
+  "markerFile": "hehe.txt",
+  "gitPushAttempted": true,
+  "gitPushSucceeded": true
 }
 ```
 
-That is the more subtle trust-boundary failure:
+The release workflow itself does not have a commit step. If branch protection allows the workflow token to push, the patched package code should create the marker commit. If branch protection blocks the push, the release proof artifact should show the git error.
 
-> The PR workflow did not leak a secret directly. It planted executable state. The trusted workflow later restored and executed that state with release authority.
+That is the trust-boundary failure:
+
+> The PR workflow planted modified dependency state. The trusted workflow later restored and executed that state with repository write authority.
 
 ## If the release workflow misses the cache
 
@@ -148,13 +176,13 @@ GitHub Actions caches are immutable. If the cache key already exists from an ear
 For repeated demos, bump this key in both workflows:
 
 ```text
-quality-report-tools-v1
+node-modules-left-pad-v1
 ```
 
 For example:
 
 ```text
-quality-report-tools-v2
+node-modules-left-pad-v2
 ```
 
 Then open a fresh fork PR.
@@ -177,19 +205,17 @@ That is obvious once you know the rule.
 The subtler chain is:
 
 ```text
-fork PR code -> target workflow execution -> poisoned cache -> trusted release restore -> release credential/OIDC available
+fork PR code -> target workflow execution -> poisoned dependency cache -> trusted release restore -> release authority available
 ```
 
-This repo demonstrates that chain with a fake release secret and a cached reporter.
+This repo demonstrates that chain with a real npm package (`left-pad`), cached `node_modules`, and a harmless same-repository `hehe.txt` marker commit attempted by the cached package code.
 
 ## Safety boundaries
 
-- Use only `POC_FAKE_SECRET`.
 - Do not add real credentials.
-- The payload records only whether a fake secret is present.
 - The payload does not print secret values.
-- The payload does not send network requests.
-- The payload writes only `.poc-proof/` and `.ci-cache/reporter.mjs`.
+- The payload does not call an external collection endpoint.
+- The payload writes only `.poc-proof/`, patches `node_modules/left-pad/index.js`, creates `hehe.txt`, and attempts a same-repository `git push` during the release workflow.
 
 ## Local simulator
 
@@ -202,4 +228,4 @@ npm run poc:pr-ci
 npm run poc:vulnerable
 ```
 
-Use that when you want the simpler first-principles version before showing the cache-chain demo.
+Use that when you want the simpler first-principles version before showing the dependency-cache demo.

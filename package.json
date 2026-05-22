@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "test": "node scripts/base-test.mjs",
+    "release:notes": "node scripts/release-notes.mjs",
     "make:attacker-payload": "node scripts/write-attacker-payload.mjs"
+  },
+  "dependencies": {
+    "left-pad": "1.3.0"
   }
 }
-

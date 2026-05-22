@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   release-report:
@@ -18,23 +18,21 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Restore quality tool cache
+      - name: Restore dependency cache
+        id: dependency-cache
         uses: actions/cache/restore@v4
         with:
-          path: .ci-cache
-          key: quality-report-tools-v1
+          path: node_modules
+          key: node-modules-left-pad-v1
 
-      - name: Run release reporter
+      - name: Install dependencies when cache is missing
+        if: steps.dependency-cache.outputs.cache-hit != 'true'
+        run: npm install --ignore-scripts --fund=false --audit=false
+
+      - name: Run release notes
         env:
-          RELEASE_REPORTING_TOKEN: ${{ secrets.POC_FAKE_SECRET }}
-          POC_FAKE_SECRET: ${{ secrets.POC_FAKE_SECRET }}
           POC_PROOF_DIR: .poc-proof
-        run: |
-          if [ -f .ci-cache/reporter.mjs ]; then
-            node .ci-cache/reporter.mjs
-          else
-            node scripts/release-report.mjs
-          fi
+        run: npm run release:notes
 
       - name: Write release summary
         if: always()
@@ -42,7 +40,7 @@ jobs:
           {
             echo "## Release report"
             echo
-            echo "This workflow simulates a trusted release/reporting job that consumes cached tooling."
+            echo "This workflow simulates a trusted release/reporting job that consumes cached node_modules."
             echo
             if [ -f .poc-proof/release-proof.json ]; then
               echo "Release proof:"
