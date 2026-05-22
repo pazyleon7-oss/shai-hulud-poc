@@ -1,62 +1,76 @@
-# `pull_request_target` GitHub POC
+# PR Quality Report Demo
 
-Disposable GitHub repository for demonstrating the main `pull_request_target` failure mode.
+This repository is a disposable GitHub Actions demo for understanding why `pull_request_target` can be dangerous when it is used as if it were normal pull request CI.
 
-The POC shows:
+The base repository looks like a small project with two PR workflows:
 
-1. `pull_request_target` can safely do metadata-only work.
-2. `pull_request` can run PR code with low authority.
-3. `pull_request_target` becomes dangerous when it checks out fork PR code and runs it.
+- `.github/workflows/pr-ci.yml`
+- `.github/workflows/pr-quality-report.yml`
 
-Use a disposable public repository. Do not add real secrets.
+The fork pull request makes the case for why one of those workflows crosses the trust boundary.
 
-## Setup
+## Base repository setup
 
-1. Create a new GitHub repository from this directory.
-2. Add one fake repository secret:
-
-   ```text
-   POC_FAKE_SECRET=fake-secret-for-demo-only
-   ```
-
-3. Push the base repository.
-4. From a separate GitHub account, fork the repository.
-5. In the fork, create a branch that adds the attacker payload:
-
-   ```bash
-   node scripts/write-attacker-payload.mjs
-   git add package.json scripts/attacker-postinstall.mjs
-   git commit -m "Add harmless PR change"
-   git push origin attacker-postinstall-poc
-   ```
-
-6. Open a pull request from the fork branch to the base repo.
-
-## What should happen
-
-Three workflows are included.
-
-### 1. Safe target workflow
-
-File:
+Create a new public repository from this directory and add one fake secret:
 
 ```text
-.github/workflows/safe-pull-request-target.yml
+POC_FAKE_SECRET=fake-secret-for-demo-only
 ```
 
-It runs on `pull_request_target`, but it does not check out or run PR code. It only writes a small summary explaining that metadata-only target workflows are the safe shape.
+Do not add any real tokens, cloud credentials, npm credentials, database URLs, Docker credentials, or production secrets.
 
-### 2. Normal PR CI workflow
+Push the repository:
 
-File:
-
-```text
-.github/workflows/normal-pull-request-ci.yml
+```bash
+git remote add origin git@github.com:YOUR_ACCOUNT/YOUR_REPO.git
+git push -u origin main
 ```
 
-It runs on `pull_request`, checks out PR code, and runs `npm install`. The attacker-controlled `postinstall` runs, but normal fork PRs do not receive repository secrets.
+## Fork-side reproduction
 
-Expected proof:
+From a separate GitHub account:
+
+1. Fork the repository.
+2. Clone the fork.
+3. Create a branch.
+4. Add the harmless payload.
+
+```bash
+git switch -c useful-fix
+node scripts/write-attacker-payload.mjs
+git add package.json scripts/attacker-postinstall.mjs
+git commit -m "Improve project setup"
+git push origin useful-fix
+```
+
+Open a pull request from the fork back to the base repository.
+
+## What the fork changes
+
+The fork does not edit the workflow.
+
+It only changes normal project files:
+
+- `package.json`
+- `scripts/attacker-postinstall.mjs`
+
+The change adds a `postinstall` hook:
+
+```json
+{
+  "scripts": {
+    "postinstall": "node scripts/attacker-postinstall.mjs"
+  }
+}
+```
+
+That is enough because both workflows run `npm install`.
+
+## Expected result
+
+The normal PR workflow runs under `pull_request`.
+
+It checks out the fork code and executes the `postinstall`, but the fake repository secret should not be present:
 
 ```json
 {
@@ -65,17 +79,9 @@ Expected proof:
 }
 ```
 
-### 3. Vulnerable target workflow
+The quality report workflow runs under `pull_request_target`.
 
-File:
-
-```text
-.github/workflows/vulnerable-pull-request-target.yml
-```
-
-It runs on `pull_request_target`, checks out the fork PR head SHA, and runs `npm install` while a fake secret is present.
-
-Expected proof:
+It also checks out the fork code and executes the same `postinstall`, but this time the fake repository secret is present:
 
 ```json
 {
@@ -84,22 +90,22 @@ Expected proof:
 }
 ```
 
-That is the bug class: fork-controlled code ran inside the privileged target-repository workflow context.
+That is the trust-boundary failure.
 
-## Important safety notes
+## Why this is realistic
 
-- Use only the fake `POC_FAKE_SECRET`.
-- Do not add cloud, npm, Docker, GitHub PAT, database, or production secrets.
-- Do not run this workflow in a real project.
-- The attacker script does not print secret values. It records only whether the fake secret is present.
-- The vulnerable workflow intentionally leaves checkout credentials persisted so the proof can show whether token-backed git credentials are present. It does not print those credentials.
+The risky workflow is not named like an exploit. It looks like a common automation goal:
 
-## Why this recreates the Shai-Hulud class
+- run PR checks
+- work for fork pull requests
+- write a PR report/comment
+- use a repository secret for reporting/authentication
 
-The first failure in the Shai-Hulud/TanStack-style chain is not mysterious:
+The unsafe decision is here:
 
 ```yaml
-on: pull_request_target
+on:
+  pull_request_target:
 
 steps:
   - uses: actions/checkout@v4
@@ -110,13 +116,22 @@ steps:
   - run: npm install
 ```
 
-If the PR changes `package.json` and adds a `postinstall`, that PR code executes in the target workflow.
+That turns untrusted fork files into code running inside the base repository's privileged workflow context.
 
-The full supply-chain incident then chained this kind of trust-boundary break with cache poisoning and release/OIDC publishing. This POC stops at the first boundary break.
+## Safety boundaries
+
+This POC is intentionally non-destructive:
+
+- The only secret should be `POC_FAKE_SECRET`.
+- The payload records only whether the fake secret is present.
+- The payload records whether token-backed checkout credentials appear to be configured.
+- The payload does not print secret values.
+- The payload does not send network requests.
+- The payload writes only `.poc-proof/proof.json` and the GitHub step summary.
 
 ## Local simulator
 
-The `poc/` directory contains a local simulator that proves the same concept without GitHub.
+The `poc/` directory contains the earlier explicit simulator:
 
 ```bash
 cd poc
@@ -124,4 +139,6 @@ npm run poc:safe-target
 npm run poc:pr-ci
 npm run poc:vulnerable
 ```
+
+Use that when you want a more obvious teaching version before showing the GitHub fork demo.
 

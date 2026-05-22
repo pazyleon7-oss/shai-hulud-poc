@@ -1,4 +1,4 @@
-name: "POC Vulnerable: pull_request_target runs PR code"
+name: "PR Quality Report"
 
 on:
   pull_request_target:
@@ -10,43 +10,56 @@ permissions:
   issues: write
 
 jobs:
-  vulnerable:
+  quality-report:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout attacker-controlled PR code
+      - name: Checkout pull request changes
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Run npm install in privileged target context
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
         env:
+          REPORTING_TOKEN: ${{ secrets.POC_FAKE_SECRET }}
           POC_FAKE_SECRET: ${{ secrets.POC_FAKE_SECRET }}
           POC_PROOF_DIR: .poc-proof
         run: npm install --ignore-scripts=false --fund=false --audit=false
 
-      - name: Print proof
+      - name: Run quality checks
+        run: npm test
+
+      - name: Write report
         if: always()
         run: |
           {
-            echo "## Vulnerable pull_request_target proof"
+            echo "## PR quality report"
             echo
-            echo "This workflow checked out the fork PR head and ran npm install in the target-repository context."
+            echo "- PR: #${{ github.event.pull_request.number }}"
+            echo "- Head repo: ${{ github.event.pull_request.head.repo.full_name }}"
+            echo "- Head SHA: ${{ github.event.pull_request.head.sha }}"
             echo
             if [ -f .poc-proof/proof.json ]; then
+              echo "Payload proof found:"
+              echo
               echo '```json'
               cat .poc-proof/proof.json
               echo '```'
             else
-              echo "No attacker proof file was created. The PR may not include the payload yet."
+              echo "No payload proof file was found."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload proof
+      - name: Upload quality report artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vulnerable-pull-request-target-proof
+          name: pr-quality-report
           path: .poc-proof/
           if-no-files-found: ignore
 

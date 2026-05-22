@@ -1,4 +1,4 @@
-name: "POC Safer: pull_request runs PR code"
+name: "PR CI"
 
 on:
   pull_request:
@@ -8,39 +8,49 @@ permissions:
   contents: read
 
 jobs:
-  pr-ci:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout PR code
+      - name: Checkout pull request
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Run npm install in low-authority context
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
         env:
           POC_PROOF_DIR: .poc-proof
         run: npm install --ignore-scripts=false --fund=false --audit=false
 
-      - name: Print proof
+      - name: Run tests
+        run: npm test
+
+      - name: Write report
         if: always()
         run: |
           {
-            echo "## Normal pull_request proof"
+            echo "## PR CI report"
             echo
             if [ -f .poc-proof/proof.json ]; then
+              echo "Payload proof found:"
+              echo
               echo '```json'
               cat .poc-proof/proof.json
               echo '```'
             else
-              echo "No attacker proof file was created. The PR may not include the payload yet."
+              echo "No payload proof file was found."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload proof
+      - name: Upload CI artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: normal-pull-request-proof
+          name: pr-ci-report
           path: .poc-proof/
           if-no-files-found: ignore
 
