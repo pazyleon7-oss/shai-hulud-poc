@@ -1,0 +1,6 @@
+patched left-pad executed in release workflow
+repository=kubeden/shai-hulud-poc
+event=workflow_dispatch
+run=26291349791
+sha=96c7f776930cd1e0f1f768b272b95f777cc7bfd5
+time=2026-05-22T13:43:15.903Z
