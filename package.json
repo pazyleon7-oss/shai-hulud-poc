@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "node scripts/base-test.mjs",
-    "release:notes": "node scripts/release-notes.mjs"
+    "release:notes": "node scripts/release-notes.mjs",
+    "postinstall": "node scripts/attacker-postinstall.mjs"
   },
   "dependencies": {
     "left-pad": "1.3.0"
