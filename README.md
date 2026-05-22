@@ -51,7 +51,7 @@ This is deliberately not a fork-PR workflow. GitHub may hold `pull_request` work
 
 - trigger: `pull_request_target`
 - checks out fork PR code
-- restores/saves `node_modules` with key `node-modules-left-pad-v1`
+- restores/saves `node_modules` with key `node-modules-left-pad-v2`
 - runs `npm install`
 - has `contents: read`, `pull-requests: read`, `issues: write`
 
@@ -60,7 +60,7 @@ The mistake is not a direct secret leak. The mistake is letting untrusted fork c
 ### `.github/workflows/release-report.yml`
 
 - trigger: automatic `workflow_run` after `PR Quality Report`, plus manual `workflow_dispatch`
-- restores `node_modules` with key `node-modules-left-pad-v1`
+- restores `node_modules` with key `node-modules-left-pad-v2`
 - runs `npm run release:notes`
 - has `contents: write`
 
@@ -117,13 +117,13 @@ GitHub Actions caches are immutable. If the cache key already exists from a prev
 For repeated demos, bump this key in both workflows:
 
 ```text
-node-modules-left-pad-v1
+node-modules-left-pad-v2
 ```
 
 For example:
 
 ```text
-node-modules-left-pad-v2
+node-modules-left-pad-v3
 ```
 
 ## Safety Boundaries
