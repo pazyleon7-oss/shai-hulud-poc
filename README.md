@@ -28,10 +28,10 @@ The project depends on a real npm package:
 }
 ```
 
-The dependency graph is pinned by `package-lock.json`. Both the PR quality workflow and release workflow derive the dependency cache key from that lockfile:
+The dependency graph is pinned by `package-lock.json`. Both the PR quality workflow and release workflow derive the dependency cache key from the lockfile hash immediately after checkout:
 
 ```text
-node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+node-modules-${runner.os}-${sha256(package-lock.json)}
 ```
 
 The release workflow runs:
@@ -120,10 +120,10 @@ If branch protection or repository settings block the push, the proof artifact s
 
 GitHub Actions caches are immutable. If the computed cache key already exists from a previous clean run, the PR cannot overwrite it.
 
-For repeated demos, change the cache namespace prefix in both workflows, or make a harmless lockfile change that produces a new `hashFiles('package-lock.json')` value.
+For repeated demos, change the cache namespace prefix in both workflows, or make a harmless lockfile change that produces a new `sha256(package-lock.json)` value.
 
 ```text
-node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+node-modules-${runner.os}-${sha256(package-lock.json)}
 ```
 
 ## Safety Boundaries

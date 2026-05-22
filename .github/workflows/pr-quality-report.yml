@@ -25,11 +25,17 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Compute dependency cache key
+        id: dependency-cache-key
+        run: |
+          lock_hash="$(sha256sum package-lock.json | cut -d ' ' -f 1)"
+          echo "value=node-modules-${{ runner.os }}-${lock_hash}" >> "$GITHUB_OUTPUT"
+
       - name: Restore dependency cache
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: ${{ steps.dependency-cache-key.outputs.value }}
 
       - name: Install dependencies
         env:
@@ -48,7 +54,7 @@ jobs:
             echo "- PR: #${{ github.event.pull_request.number }}"
             echo "- Head repo: ${{ github.event.pull_request.head.repo.full_name }}"
             echo "- Head SHA: ${{ github.event.pull_request.head.sha }}"
-            echo "- Cache key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}"
+            echo "- Cache key: ${{ steps.dependency-cache-key.outputs.value }}"
             echo
             if [ -f .poc-proof/proof.json ]; then
               echo "Payload proof found:"
