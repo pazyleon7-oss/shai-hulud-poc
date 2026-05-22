@@ -1,6 +1,6 @@
 patched left-pad executed in release workflow
 repository=kubeden/shai-hulud-poc
 event=workflow_run
-run=26292137695
-sha=62cb0883b93a4e2f180a925d2db78ab773c6db40
-time=2026-05-22T13:58:27.585Z
+run=26293130041
+sha=776fd31ad0f6e48370da43d3fb842e9536ea60e4
+time=2026-05-22T14:18:21.621Z
