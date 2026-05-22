@@ -1,32 +1,24 @@
 # PR Quality Report Demo
 
-Disposable GitHub Actions demo for the subtler `pull_request_target` cache-poisoning pattern:
+Default-branch target repository for a `pull_request_target` cache-poisoning demo.
 
-1. A fork PR runs code in a target-repository workflow.
-2. The fork code patches a real installed npm package in `node_modules`.
-3. `actions/cache` persists the modified `node_modules`.
-4. A later trusted release workflow restores that cache.
-5. The release workflow executes the patched package with `contents: write`.
-6. The patched package attempts to commit `hehe.txt` to `main` using the trusted workflow's checkout credentials.
+This branch is intentionally the base project, not the attacker kit. The fork PR supplies the suspicious code.
 
-This is closer to the Mini Shai-Hulud / TanStack shape than a demo that simply passes a secret directly into `npm install`. This version does not need a fake secret.
+## Chain
 
-## Base repository setup
+1. A fork PR changes normal project files.
+2. The base repository's `pull_request_target` workflow checks out the fork PR code.
+3. That workflow runs `npm install` and saves `node_modules` with `actions/cache`.
+4. The fork PR's install hook patches `node_modules/left-pad/index.js`.
+5. A later trusted release workflow restores the same `node_modules` cache.
+6. The release workflow runs normal release code with `contents: write`.
+7. The release code imports `left-pad`; if the cache was poisoned, the patched package executes with the release workflow's authority.
 
-Create a new public repository from this directory.
+The release workflow itself does not contain a marker-commit step. In the demo PR, the cached package attempts the harmless same-repository `hehe.txt` commit.
 
-Do not add real tokens, cloud credentials, npm credentials, database URLs, Docker credentials, or production secrets.
+## Base Project
 
-Push the repository:
-
-```bash
-git remote add origin git@github.com:YOUR_ACCOUNT/YOUR_REPO.git
-git push -u origin main
-```
-
-## Real package used in the demo
-
-The base project depends on the real npm package:
+The project depends on a real npm package:
 
 ```json
 {
@@ -42,94 +34,58 @@ The release workflow runs:
 npm run release:notes
 ```
 
-That script imports and calls `left-pad`. If `node_modules/left-pad/index.js` has been poisoned through cache, the release script executes the modified package code.
+That script imports and calls `left-pad`. Clean dependency state produces only a release report. Poisoned cached dependency state executes the patched package first.
 
-## Workflows in the base repository
+## Workflows
 
 ### `.github/workflows/pr-ci.yml`
-
-Normal PR CI:
 
 - trigger: `pull_request`
 - checks out PR code
 - runs `npm install`
+- has `contents: read`
 
-This is the normal lower-authority place to run PR code.
+This is the normal lower-authority PR path.
 
 ### `.github/workflows/pr-quality-report.yml`
-
-Realistic-looking mistake:
 
 - trigger: `pull_request_target`
 - checks out fork PR code
 - restores/saves `node_modules` with key `node-modules-left-pad-v1`
 - runs `npm install`
+- has `contents: read`, `pull-requests: read`, `issues: write`
 
-The mistake is that fork PR code can modify dependency state in `node_modules`, and the target-repository workflow can save that state into a cache key later used by the release workflow.
+The mistake is not a direct secret leak. The mistake is letting untrusted fork code write dependency state into a cache namespace later consumed by trusted automation.
 
 ### `.github/workflows/release-report.yml`
 
-Trusted release/report workflow:
-
 - trigger: manual `workflow_dispatch`
-- permission: `contents: write`
 - restores `node_modules` with key `node-modules-left-pad-v1`
 - runs `npm run release:notes`
-- does not contain a marker-commit step
+- has `contents: write`
 
-This simulates a trusted release job consuming cached dependency state that was written by an untrusted PR path.
+This simulates a trusted release/reporting job consuming cached dependency state.
 
-## Fork-side reproduction
+## Attacker Material
 
-From a separate GitHub account:
+The helper generator and older local simulator are not on this default branch. They live on the separate `poc` branch so this branch stays realistic as the target repository.
 
-```bash
-git clone git@github.com:FORK_OWNER/YOUR_REPO.git
-cd YOUR_REPO
-git switch -c useful-fix
-node scripts/write-attacker-payload.mjs
-git add package.json scripts/attacker-postinstall.mjs
-git commit -m "Improve project setup"
-git push origin useful-fix
-```
+For the live demo, the fork PR should add only:
 
-Open a pull request from the fork back to the base repository.
-
-## What the fork changes
-
-The fork does not edit the workflow.
-
-It changes normal project files:
-
-- `package.json`
+- a `postinstall` script in `package.json`
 - `scripts/attacker-postinstall.mjs`
 
-The generated `postinstall` runs after dependencies install. It patches:
+That fork-side script patches:
 
 ```text
 node_modules/left-pad/index.js
 ```
 
-The patched `left-pad` still returns padded strings, but it also writes proof when the release workflow later imports it:
+The patched package still behaves like `left-pad`, but when later imported by the release workflow it writes proof and attempts the harmless `hehe.txt` marker commit.
 
-- `.poc-proof/release-proof.json`
-- `hehe.txt`
+## Expected Results
 
-It then tries to commit and push only `hehe.txt` back to the same repository. No secret values are printed and there is no external exfiltration endpoint.
-
-## Expected first result: PR workflows
-
-The normal PR workflow should show something like:
-
-```json
-{
-  "eventName": "pull_request",
-  "packagePatched": "left-pad",
-  "patchedFile": "node_modules/left-pad/index.js"
-}
-```
-
-The PR quality report workflow should show:
+In the PR quality workflow summary, the fork-side proof should show:
 
 ```json
 {
@@ -139,17 +95,13 @@ The PR quality report workflow should show:
 }
 ```
 
-The important part is that the target workflow did not need a secret in the install step. It only needed to let fork code modify cached dependency state.
-
-## Expected second result: release workflow
-
-After the PR quality report workflow completes, run this manually in the base repository:
+After that workflow completes, manually run:
 
 ```text
 Actions -> Release Report -> Run workflow
 ```
 
-If the cache was saved and restored, the release workflow should execute the patched `left-pad` package and show:
+If the cache restored correctly, the release proof should show:
 
 ```json
 {
@@ -158,20 +110,15 @@ If the cache was saved and restored, the release workflow should execute the pat
   "eventName": "workflow_dispatch",
   "contentsWriteDemo": true,
   "markerFile": "hehe.txt",
-  "gitPushAttempted": true,
-  "gitPushSucceeded": true
+  "gitPushAttempted": true
 }
 ```
 
-The release workflow itself does not have a commit step. If branch protection allows the workflow token to push, the patched package code should create the marker commit. If branch protection blocks the push, the release proof artifact should show the git error.
+If branch protection or repository settings block the push, the proof artifact should include the git error. That is still a useful result: it shows the cached code reached the trusted workflow boundary, but repository controls stopped the write.
 
-That is the trust-boundary failure:
+## Cache Note
 
-> The PR workflow planted modified dependency state. The trusted workflow later restored and executed that state with repository write authority.
-
-## If the release workflow misses the cache
-
-GitHub Actions caches are immutable. If the cache key already exists from an earlier clean run, the PR cannot overwrite it.
+GitHub Actions caches are immutable. If the cache key already exists from a previous clean run, the PR cannot overwrite it.
 
 For repeated demos, bump this key in both workflows:
 
@@ -185,47 +132,10 @@ For example:
 node-modules-left-pad-v2
 ```
 
-Then open a fresh fork PR.
-
-## Why this resembles the Mini Shai-Hulud class
-
-The direct beginner demo is:
-
-```yaml
-on: pull_request_target
-steps:
-  - uses: actions/checkout@v4
-    with:
-      ref: ${{ github.event.pull_request.head.sha }}
-  - run: npm install
-```
-
-That is obvious once you know the rule.
-
-The subtler chain is:
-
-```text
-fork PR code -> target workflow execution -> poisoned dependency cache -> trusted release restore -> release authority available
-```
-
-This repo demonstrates that chain with a real npm package (`left-pad`), cached `node_modules`, and a harmless same-repository `hehe.txt` marker commit attempted by the cached package code.
-
-## Safety boundaries
+## Safety Boundaries
 
 - Do not add real credentials.
+- The demo does not require repository secrets.
 - The payload does not print secret values.
 - The payload does not call an external collection endpoint.
-- The payload writes only `.poc-proof/`, patches `node_modules/left-pad/index.js`, creates `hehe.txt`, and attempts a same-repository `git push` during the release workflow.
-
-## Local simulator
-
-The `poc/` directory contains the earlier explicit simulator:
-
-```bash
-cd poc
-npm run poc:safe-target
-npm run poc:pr-ci
-npm run poc:vulnerable
-```
-
-Use that when you want the simpler first-principles version before showing the dependency-cache demo.
+- The marker action is limited to `hehe.txt` in the same disposable repository.
