@@ -28,6 +28,12 @@ The project depends on a real npm package:
 }
 ```
 
+The dependency graph is pinned by `package-lock.json`. Both the PR quality workflow and release workflow derive the dependency cache key from that lockfile:
+
+```text
+node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+```
+
 The release workflow runs:
 
 ```bash
@@ -51,7 +57,7 @@ This is deliberately not a fork-PR workflow. GitHub may hold `pull_request` work
 
 - trigger: `pull_request_target`
 - checks out fork PR code
-- restores/saves `node_modules` with key `node-modules-left-pad-v2`
+- restores/saves `node_modules` with a key derived from `package-lock.json`
 - runs `npm install`
 - has `contents: read`, `pull-requests: read`, `issues: write`
 
@@ -60,7 +66,7 @@ The mistake is not a direct secret leak. The mistake is letting untrusted fork c
 ### `.github/workflows/release-report.yml`
 
 - trigger: automatic `workflow_run` after `PR Quality Report`, plus manual `workflow_dispatch`
-- restores `node_modules` with key `node-modules-left-pad-v2`
+- restores `node_modules` with the same key derived from `package-lock.json`
 - runs `npm run release:notes`
 - has `contents: write`
 
@@ -112,18 +118,12 @@ If branch protection or repository settings block the push, the proof artifact s
 
 ## Cache Note
 
-GitHub Actions caches are immutable. If the cache key already exists from a previous clean run, the PR cannot overwrite it.
+GitHub Actions caches are immutable. If the computed cache key already exists from a previous clean run, the PR cannot overwrite it.
 
-For repeated demos, bump this key in both workflows:
-
-```text
-node-modules-left-pad-v2
-```
-
-For example:
+For repeated demos, change the cache namespace prefix in both workflows, or make a harmless lockfile change that produces a new `hashFiles('package-lock.json')` value.
 
 ```text
-node-modules-left-pad-v3
+node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 ```
 
 ## Safety Boundaries

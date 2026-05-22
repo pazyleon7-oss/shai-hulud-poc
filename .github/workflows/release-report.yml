@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: node_modules
-          key: node-modules-left-pad-v2
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies when cache is missing
         if: steps.dependency-cache.outputs.cache-hit != 'true'
